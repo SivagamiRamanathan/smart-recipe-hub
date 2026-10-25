@@ -1,15 +1,12 @@
-```php
-<?php
 
+<?php
 
 require_once __DIR__ . '/db.php';
 
-$recipes = $pdo->query(
-    "SELECT id, recipe_name, recipe_name_ta, recipe_name_th,
-            base_yield, base_unit
-     FROM recipes
-     ORDER BY recipe_name"
-)->fetchAll(PDO::FETCH_ASSOC);
+/*
+ * Smart Recipe Hub Calculator
+ * Uses the existing PostgreSQL recipes table.
+ */
 
 $error = '';
 $result = null;
@@ -20,39 +17,37 @@ if (!in_array($lang, ['en', 'ta', 'th'], true)) {
     $lang = 'en';
 }
 
+/* Normalize measurement units */
 function calculatorNormalizeUnit(string $unit): string
 {
     $unit = strtolower(trim($unit));
 
-    $aliases = [
+    $map = [
         'gram' => 'g',
         'grams' => 'g',
         'kilogram' => 'kg',
         'kilograms' => 'kg',
-
         'millilitre' => 'ml',
         'millilitres' => 'ml',
         'milliliter' => 'ml',
         'milliliters' => 'ml',
-
         'liter' => 'litre',
         'liters' => 'litre',
         'litres' => 'litre',
         'l' => 'litre',
-
         'teaspoon' => 'tsp',
         'teaspoons' => 'tsp',
         'tablespoon' => 'tbsp',
         'tablespoons' => 'tbsp',
-
-        'cup' => 'cups',
+        'cups' => 'cup',
         'pieces' => 'piece',
         'count' => 'piece',
     ];
 
-    return $aliases[$unit] ?? $unit;
+    return $map[$unit] ?? $unit;
 }
 
+/* Convert units into comparable measurement categories */
 function calculatorUnitType(string $unit): string
 {
     $unit = calculatorNormalizeUnit($unit);
@@ -61,28 +56,34 @@ function calculatorUnitType(string $unit): string
         return 'weight';
     }
 
-    if (in_array($unit, ['ml', 'litre'], true)) {
+    if (in_array($unit, ['ml', 'litre', 'tsp', 'tbsp', 'cup'], true)) {
         return 'volume';
     }
 
-    if (in_array($unit, ['piece'], true)) {
+    if ($unit === 'piece') {
         return 'count';
     }
 
     return 'other';
 }
 
+/* Convert a quantity into a common unit */
 function calculatorToBase(float $quantity, string $unit): float
 {
     $unit = calculatorNormalizeUnit($unit);
 
-    if (in_array($unit, ['kg', 'litre'], true)) {
-        return $quantity * 1000;
-    }
+    $factors = [
+        'kg' => 1000,
+        'litre' => 1000,
+        'tsp' => 5,
+        'tbsp' => 15,
+        'cup' => 240,
+    ];
 
-    return $quantity;
+    return $quantity * ($factors[$unit] ?? 1);
 }
 
+/* Format scaled quantities */
 function calculatorFormatNumber(float $number): string
 {
     if (abs($number - round($number)) < 0.000001) {
@@ -95,287 +96,258 @@ function calculatorFormatNumber(float $number): string
     );
 }
 
-/**
- * Scale measurements written in the preparation method.
- *
- * Cooking times and temperatures are intentionally not scaled.
- */
-function calculatorScaleMethod(string $method, float $factor): string
+/* Parse fractions used in ingredient lists */
+function calculatorParseQuantity(string $value): ?float
 {
-    $pattern = '~(?<![\w.])'
-        . '(\d+\s*/\s*\d+|\d+(?:\.\d+)?|[½¼¾⅓⅔])'
-        . '\s*'
-        . '(kilograms?|kg|grams?|g|millilitres?|milliliters?|ml'
-        . '|litres?|liters?|litre|liter|l'
-        . '|teaspoons?|tsp|tablespoons?|tbsp|cups?)'
-        . '\b~iu';
+    $value = trim($value);
 
-    $scaledMethod = preg_replace_callback(
-        $pattern,
-        static function (array $matches) use ($factor): string {
-            $number = trim($matches[1]);
-            $unit = $matches[2];
+    $fractions = [
+        '½' => 0.5,
+        '¼' => 0.25,
+        '¾' => 0.75,
+        '⅓' => 1 / 3,
+        '⅔' => 2 / 3,
+    ];
 
-            $fractions = [
-                '½' => 0.5,
-                '¼' => 0.25,
-                '¾' => 0.75,
-                '⅓' => 1 / 3,
-                '⅔' => 2 / 3,
-            ];
+    if (isset($fractions[$value])) {
+        return $fractions[$value];
+    }
 
-            if (isset($fractions[$number])) {
-                $quantity = $fractions[$number];
-            } elseif (str_contains($number, '/')) {
-                $parts = preg_split('~/~', $number);
+    if (preg_match('/^(\d+)\s*\/\s*(\d+)$/', $value, $matches)) {
+        $denominator = (int)$matches[2];
 
-                if (!$parts || count($parts) !== 2) {
-                    return $matches[0];
-                }
+        if ($denominator === 0) {
+            return null;
+        }
 
-                $numerator = (float)trim($parts[0]);
-                $denominator = (float)trim($parts[1]);
+        return (int)$matches[1] / $denominator;
+    }
 
-                if ($denominator == 0.0) {
-                    return $matches[0];
-                }
+    if (is_numeric($value)) {
+        return (float)$value;
+    }
 
-                $quantity = $numerator / $denominator;
-            } else {
-                $quantity = (float)$number;
-            }
+    return null;
+}
 
-            $scaled = $quantity * $factor;
-
-            return calculatorFormatNumber($scaled) . ' ' . $unit;
-        },
-        $method
+/* Load saved recipes */
+try {
+    $recipeQuery = $pdo->query(
+        "SELECT id, recipe_name, recipe_name_ta, recipe_name_th,
+                base_yield, base_unit
+         FROM recipes
+         ORDER BY recipe_name"
     );
 
-    return $scaledMethod ?? $method;
+    $recipes = $recipeQuery->fetchAll();
+
+} catch (PDOException $e) {
+    error_log('Calculator recipe list error: ' . $e->getMessage());
+    http_response_code(500);
+    exit('Unable to load recipes. Please check the database configuration.');
 }
 
-function calculatorScaleIngredientList(
-    string $raw,
-    float $factor
-): array {
-    $items = json_decode($raw, true);
-    $ingredients = [];
-
-    /*
-     * JSON ingredient format:
-     * [
-     *   {"name":"Mango","quantity":1,"unit":"kg"}
-     * ]
-     */
-    if (is_array($items)) {
-        foreach ($items as $item) {
-            if (!is_array($item)) {
-                continue;
-            }
-
-            $quantity = isset($item['quantity'])
-                && is_numeric($item['quantity'])
-                ? (float)$item['quantity']
-                : null;
-
-            $unit = calculatorNormalizeUnit(
-                (string)($item['unit'] ?? '')
-            );
-
-            $nameEn = (string)(
-                $item['name_en']
-                ?? $item['name']
-                ?? 'Ingredient'
-            );
-
-            $nameTa = (string)($item['name_ta'] ?? '');
-            $nameTh = (string)($item['name_th'] ?? '');
-
-            $displayQuantity = '';
-
-            if ($quantity !== null) {
-                $displayQuantity = calculatorFormatNumber(
-                    $quantity * $factor
-                );
-
-                if ($unit !== '') {
-                    $displayQuantity .= ' ' . $unit;
-                }
-            }
-
-            $ingredients[] = [
-                'name_en' => $nameEn,
-                'name_ta' => $nameTa,
-                'name_th' => $nameTh,
-                'display_quantity' => $displayQuantity,
-            ];
-        }
-
-        return $ingredients;
-    }
-
-    /*
-     * Plain-text ingredient format:
-     * Mango - 1 kg
-     * Chilli powder - 100 g
-     */
-    $lines = preg_split('/\r\n|\r|\n/', $raw) ?: [];
-
-    foreach ($lines as $line) {
-        $line = trim($line);
-
-        $line = preg_replace(
-            '/^[\s\-•*]+/u',
-            '',
-            $line
-        ) ?? $line;
-
-        if ($line === '') {
-            continue;
-        }
-
-        $pattern = '~^(.*?)\s*(?:–|—|-|:)?\s*'
-            . '(\d+\s*/\s*\d+|\d+(?:\.\d+)?|[½¼¾⅓⅔])'
-            . '\s*'
-            . '(kilograms?|kg|grams?|g|millilitres?|milliliters?|ml'
-            . '|litres?|liters?|litre|liter|l'
-            . '|teaspoons?|tsp|tablespoons?|tbsp|cups?)'
-            . '\s*$~iu';
-
-        if (preg_match($pattern, $line, $matches)) {
-            $number = trim($matches[2]);
-
-            $fractions = [
-                '½' => 0.5,
-                '¼' => 0.25,
-                '¾' => 0.75,
-                '⅓' => 1 / 3,
-                '⅔' => 2 / 3,
-            ];
-
-            if (isset($fractions[$number])) {
-                $quantity = $fractions[$number];
-            } elseif (str_contains($number, '/')) {
-                $parts = preg_split('~/~', $number);
-
-                if (!$parts || count($parts) !== 2) {
-                    $ingredients[] = [
-                        'name_en' => trim($matches[1]),
-                        'name_ta' => '',
-                        'name_th' => '',
-                        'display_quantity' => '',
-                    ];
-
-                    continue;
-                }
-
-                $denominator = (float)trim($parts[1]);
-
-                $quantity = $denominator == 0.0
-                    ? 0.0
-                    : (float)trim($parts[0]) / $denominator;
-            } else {
-                $quantity = (float)$number;
-            }
-
-            $unit = calculatorNormalizeUnit($matches[3]);
-
-            $ingredients[] = [
-                'name_en' => trim($matches[1]),
-                'name_ta' => '',
-                'name_th' => '',
-                'display_quantity' => calculatorFormatNumber(
-                    $quantity * $factor
-                ) . ' ' . $unit,
-            ];
-        } else {
-            $ingredients[] = [
-                'name_en' => $line,
-                'name_ta' => '',
-                'name_th' => '',
-                'display_quantity' => '',
-            ];
-        }
-    }
-
-    return $ingredients;
-}
-
+/* Calculate requested recipe quantities */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
     verify_csrf();
 
-    $id = filter_var(
+    $recipeId = filter_var(
         $_POST['recipe_id'] ?? null,
         FILTER_VALIDATE_INT
     );
 
-    $quantityInput = trim(
-        (string)($_POST['quantity'] ?? '')
-    );
+    $quantityInput = trim((string)($_POST['quantity'] ?? ''));
 
-    $unit = calculatorNormalizeUnit(
+    $requestedUnit = calculatorNormalizeUnit(
         (string)($_POST['unit'] ?? 'g')
     );
 
-    if (!$id) {
-        $error = 'Please select a recipe from the dropdown.';
+    if (!$recipeId || $recipeId < 1) {
+        $error = 'Please select a saved recipe.';
     } elseif (
         !is_numeric($quantityInput)
         || (float)$quantityInput <= 0
         || (float)$quantityInput > 100000
     ) {
-        $error = 'Enter a valid positive quantity (maximum 100000).';
+        $error = 'Enter a quantity greater than 0 and not more than 100000.';
     } else {
         try {
             $statement = $pdo->prepare(
-                'SELECT * FROM recipes WHERE id = ?'
+                "SELECT * FROM recipes WHERE id = :id"
             );
 
-            $statement->execute([$id]);
+            $statement->execute(['id' => $recipeId]);
 
-            $recipe = $statement->fetch(PDO::FETCH_ASSOC);
+            $recipe = $statement->fetch();
 
             if (!$recipe) {
-                $error = 'Recipe not found in the database.';
+                $error = 'The selected recipe was not found.';
             } else {
-                $baseYield = (float)(
-                    $recipe['base_yield'] ?? 1
-                );
+                $baseYield = (float)($recipe['base_yield'] ?? 1);
 
                 $baseUnit = calculatorNormalizeUnit(
                     (string)($recipe['base_unit'] ?? 'g')
                 );
 
                 if ($baseYield <= 0) {
-                    $error = 'This recipe has an invalid base yield. Please correct it in Admin.';
+                    $error = 'The recipe base yield must be greater than zero.';
                 } elseif (
-                    calculatorUnitType($unit)
-                    !== calculatorUnitType($baseUnit)
-                    || calculatorUnitType($unit) === 'other'
+                    calculatorUnitType($requestedUnit) === 'other'
+                    || calculatorUnitType($baseUnit) === 'other'
+                    || calculatorUnitType($requestedUnit)
+                        !== calculatorUnitType($baseUnit)
                 ) {
-                    $error = 'Choose a compatible unit: g/kg for weight or ml/litre for volume.';
+                    $error = 'Choose a compatible unit. Weight: g/kg; volume: ml/litre; count: piece.';
                 } else {
+                    /*
+                     * The selected quantity is compared with the recipe's
+                     * base yield to calculate the scaling factor.
+                     */
                     $factor = calculatorToBase(
                         (float)$quantityInput,
-                        $unit
-                    ) / calculatorToBase(
-                        $baseYield,
-                        $baseUnit
-                    );
+                        $requestedUnit
+                    ) / calculatorToBase($baseYield, $baseUnit);
 
-                    $rawIngredients = (string)(
-                        $recipe['ingredients'] ?? ''
-                    );
+                    $rawIngredients = (string)($recipe['ingredients'] ?? '');
 
-                    $ingredients = calculatorScaleIngredientList(
+                    $ingredientData = json_decode(
                         $rawIngredients,
-                        $factor
+                        true
                     );
 
-                    $recipeName = (string)(
-                        $recipe['recipe_name'] ?? 'Recipe'
-                    );
+                    $ingredients = [];
+
+                    /*
+                     * JSON ingredient format:
+                     * [
+                     *   {"name":"Rice","quantity":200,"unit":"g"},
+                     *   {"name":"Water","quantity":500,"unit":"ml"}
+                     * ]
+                     */
+                    if (
+                        json_last_error() === JSON_ERROR_NONE
+                        && is_array($ingredientData)
+                    ) {
+                        foreach ($ingredientData as $item) {
+                            if (!is_array($item)) {
+                                continue;
+                            }
+
+                            $ingredientName = (string)(
+                                $item['name']
+                                ?? $item['name_en']
+                                ?? 'Ingredient'
+                            );
+
+                            $ingredientQuantity = null;
+
+                            if (
+                                isset($item['quantity'])
+                                && is_numeric($item['quantity'])
+                            ) {
+                                $ingredientQuantity = (float)$item['quantity'];
+                            }
+
+                            $ingredientUnit = calculatorNormalizeUnit(
+                                (string)($item['unit'] ?? '')
+                            );
+
+                            $displayQuantity = '';
+
+                            if ($ingredientQuantity !== null) {
+                                $scaledQuantity = $ingredientQuantity * $factor;
+
+                                $displayQuantity = calculatorFormatNumber(
+                                    $scaledQuantity
+                                );
+
+                                if ($ingredientUnit !== '') {
+                                    $displayQuantity .= ' ' . $ingredientUnit;
+                                }
+                            }
+
+                            $ingredients[] = [
+                                'name_en' => $ingredientName,
+                                'name_ta' => (string)($item['name_ta'] ?? ''),
+                                'name_th' => (string)($item['name_th'] ?? ''),
+                                'display_quantity' => $displayQuantity,
+                            ];
+                        }
+                    } else {
+                        /*
+                         * Plain-text ingredient format:
+                         * Rice - 200 g
+                         * Water - 500 ml
+                         *
+                         * Lines without a recognizable quantity are
+                         * preserved without scaling.
+                         */
+                        $lines = preg_split(
+                            '/\r\n|\r|\n/',
+                            $rawIngredients
+                        ) ?: [];
+
+                        foreach ($lines as $line) {
+                            $line = trim($line);
+
+                            $line = preg_replace(
+                                '/^[\s\-•*]+/u',
+                                '',
+                                $line
+                            ) ?? $line;
+
+                            if ($line === '') {
+                                continue;
+                            }
+
+                            $pattern = '/^(.*?)\s*(?:–|—|-|:)?\s*'
+                                . '(\d+(?:\.\d+)?|\d+\s*\/\s*\d+|½|¼|¾|⅓|⅔)'
+                                . '\s*(kg|kilograms?|g|grams?|ml|millilitres?'
+                                . '|milliliters?|litres?|liters?|l|tsp'
+                                . '|teaspoons?|tbsp|tablespoons?|cups?)\b/iu';
+
+                            if (preg_match($pattern, $line, $matches)) {
+                                $ingredientName = trim($matches[1]);
+
+                                $parsedQuantity = calculatorParseQuantity(
+                                    $matches[2]
+                                );
+
+                                $ingredientUnit = calculatorNormalizeUnit(
+                                    $matches[3]
+                                );
+
+                                if ($parsedQuantity !== null) {
+                                    $scaledQuantity = $parsedQuantity * $factor;
+
+                                    $displayQuantity =
+                                        calculatorFormatNumber($scaledQuantity)
+                                        . ' '
+                                        . $ingredientUnit;
+                                } else {
+                                    $displayQuantity = '';
+                                }
+
+                                $ingredients[] = [
+                                    'name_en' => $ingredientName,
+                                    'name_ta' => '',
+                                    'name_th' => '',
+                                    'display_quantity' => $displayQuantity,
+                                ];
+                            } else {
+                                $ingredients[] = [
+                                    'name_en' => $line,
+                                    'name_ta' => '',
+                                    'name_th' => '',
+                                    'display_quantity' => '',
+                                ];
+                            }
+                        }
+                    }
+
+                    /* Recipe title in selected language */
+                    $recipeName = (string)$recipe['recipe_name'];
 
                     if (
                         $lang === 'ta'
@@ -389,12 +361,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $recipeName = (string)$recipe['recipe_name_th'];
                     }
 
-                    $descriptionColumn = 'description_' . $lang;
-
-                    $description = (string)(
-                        $recipe[$descriptionColumn] ?? ''
-                    );
-
+                    /* Preparation method */
                     $method = (string)(
                         $recipe['preparation_method'] ?? ''
                     );
@@ -407,17 +374,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $method = (string)$recipe[$methodColumn];
                     }
 
-                    $method = calculatorScaleMethod(
-                        $method,
-                        $factor
+                    $descriptionColumn = 'description_' . $lang;
+
+                    $description = (string)(
+                        $recipe[$descriptionColumn] ?? ''
                     );
 
                     $result = [
-                        'recipe_id' => (int)$recipe['id'],
                         'recipe_name' => $recipeName,
                         'description' => $description,
                         'requested_quantity' => (float)$quantityInput,
-                        'requested_unit' => $unit,
+                        'requested_unit' => $requestedUnit,
                         'ingredients' => $ingredients,
                         'preparation_method' => $method,
                         'base_yield' => $baseYield,
@@ -425,31 +392,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ];
                 }
             }
-        } catch (PDOException $exception) {
-            error_log(
-                'Calculator query: ' . $exception->getMessage()
-            );
 
-            $error = 'Unable to read recipe from PostgreSQL. Check the database connection and recipe columns.';
+        } catch (PDOException $e) {
+            error_log('Calculator calculation error: ' . $e->getMessage());
+
+            $error = 'Unable to calculate the recipe. Please check the database.';
         }
     }
 }
 
-function calculatorUnitList(): array
-{
-    return [
-        ['Gram', 'g'],
-        ['Kilogram', 'kg'],
-        ['Millilitre', 'ml'],
-        ['Litre', 'litre'],
-    ];
-}
-?>
+/* Available units */
+$unitOptions = [
+    ['Gram', 'g'],
+    ['Kilogram', 'kg'],
+    ['Millilitre', 'ml'],
+    ['Litre', 'litre'],
+    ['Piece', 'piece'],
+];
 
-<!doctype html>
+?>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <title>Smart Recipe Hub | Calculator</title>
@@ -473,7 +438,7 @@ function calculatorUnitList(): array
             margin: 0;
             background: var(--cream);
             color: var(--ink);
-            font-family: Inter, "Segoe UI", Arial, sans-serif;
+            font-family: "Segoe UI", Arial, sans-serif;
             line-height: 1.6;
         }
 
@@ -545,7 +510,7 @@ function calculatorUnitList(): array
 
         label {
             display: block;
-            font-weight: 750;
+            font-weight: 700;
             font-size: 14px;
             margin-bottom: 7px;
         }
@@ -622,11 +587,6 @@ function calculatorUnitList(): array
             white-space: nowrap;
         }
 
-        .method {
-            white-space: pre-wrap;
-            overflow-wrap: anywhere;
-        }
-
         .actions {
             display: flex;
             gap: 10px;
@@ -676,7 +636,7 @@ function calculatorUnitList(): array
 
 <header class="hero">
     <h1>🥭 Smart Recipe Hub</h1>
-    <p>Calculate ingredients and prepare your favourite recipes.</p>
+    <p>Calculate ingredients for your required quantity</p>
 </header>
 
 <nav class="nav">
@@ -692,7 +652,8 @@ function calculatorUnitList(): array
         <h2>Calculate Ingredients</h2>
 
         <p class="muted">
-            Select a saved recipe and enter your required quantity.
+            Select a saved recipe, enter your required quantity,
+            and calculate the ingredient amounts.
         </p>
 
         <?php if ($error !== ''): ?>
@@ -714,17 +675,19 @@ function calculatorUnitList(): array
 
                         <?php foreach ($recipes as $recipe): ?>
                             <?php
-                            $recipeDisplay = match ($lang) {
-                                'ta' => (
-                                    $recipe['recipe_name_ta']
-                                    ?: $recipe['recipe_name']
-                                ),
-                                'th' => (
-                                    $recipe['recipe_name_th']
-                                    ?: $recipe['recipe_name']
-                                ),
-                                default => $recipe['recipe_name'],
-                            };
+                            $displayName = (string)$recipe['recipe_name'];
+
+                            if (
+                                $lang === 'ta'
+                                && trim((string)($recipe['recipe_name_ta'] ?? '')) !== ''
+                            ) {
+                                $displayName = (string)$recipe['recipe_name_ta'];
+                            } elseif (
+                                $lang === 'th'
+                                && trim((string)($recipe['recipe_name_th'] ?? '')) !== ''
+                            ) {
+                                $displayName = (string)$recipe['recipe_name_th'];
+                            }
                             ?>
 
                             <option
@@ -734,7 +697,7 @@ function calculatorUnitList(): array
                                     === (string)$recipe['id']
                                 ) ? 'selected' : '' ?>
                             >
-                                <?= h((string)$recipeDisplay) ?>
+                                <?= h($displayName) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -750,7 +713,7 @@ function calculatorUnitList(): array
                         min="0.01"
                         max="100000"
                         step="any"
-                        value="<?= h((string)($_POST['quantity'] ?? '500')) ?>"
+                        value="<?= h($_POST['quantity'] ?? '500') ?>"
                         required
                     >
                 </div>
@@ -759,7 +722,7 @@ function calculatorUnitList(): array
                     <label for="unit">Unit</label>
 
                     <select id="unit" name="unit">
-                        <?php foreach (calculatorUnitList() as [$label, $unitValue]): ?>
+                        <?php foreach ($unitOptions as [$unitName, $unitValue]): ?>
                             <option
                                 value="<?= h($unitValue) ?>"
                                 <?= (
@@ -768,7 +731,7 @@ function calculatorUnitList(): array
                                     ) === $unitValue
                                 ) ? 'selected' : '' ?>
                             >
-                                <?= h($label . ' (' . $unitValue . ')') ?>
+                                <?= h($unitName . ' (' . $unitValue . ')') ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -818,9 +781,9 @@ function calculatorUnitList(): array
 
                 <div class="yield">
                     <?= h(
-                        calculatorFormatNumber(
-                            $result['requested_quantity']
-                        ) . ' ' . $result['requested_unit']
+                        calculatorFormatNumber($result['requested_quantity'])
+                        . ' '
+                        . $result['requested_unit']
                     ) ?>
                 </div>
 
@@ -833,19 +796,19 @@ function calculatorUnitList(): array
                 <?php foreach ($result['ingredients'] as $ingredient): ?>
 
                     <?php
-                    $ingredientName = match ($lang) {
-                        'ta' => (
-                            $ingredient['name_ta'] !== ''
-                            ? $ingredient['name_ta']
-                            : $ingredient['name_en']
-                        ),
-                        'th' => (
-                            $ingredient['name_th'] !== ''
-                            ? $ingredient['name_th']
-                            : $ingredient['name_en']
-                        ),
-                        default => $ingredient['name_en'],
-                    };
+                    $ingredientName = $ingredient['name_en'];
+
+                    if (
+                        $lang === 'ta'
+                        && $ingredient['name_ta'] !== ''
+                    ) {
+                        $ingredientName = $ingredient['name_ta'];
+                    } elseif (
+                        $lang === 'th'
+                        && $ingredient['name_th'] !== ''
+                    ) {
+                        $ingredientName = $ingredient['name_th'];
+                    }
                     ?>
 
                     <div class="ingredient">
@@ -861,7 +824,7 @@ function calculatorUnitList(): array
             <?php else: ?>
 
                 <p class="muted">
-                    Ingredient details are not available for this recipe.
+                    No ingredients have been added to this recipe yet.
                 </p>
 
             <?php endif; ?>
@@ -872,26 +835,27 @@ function calculatorUnitList(): array
 
             <?php if (trim($result['preparation_method']) !== ''): ?>
 
-                <div class="method"><?= h($result['preparation_method']) ?></div>
+                <div>
+                    <?= nl2br(h($result['preparation_method'])) ?>
+                </div>
 
             <?php else: ?>
 
                 <p class="muted">
-                    Preparation method is not available for this recipe
-                    in the selected language.
+                    Preparation method has not been added for this recipe.
                 </p>
 
             <?php endif; ?>
 
-            <p class="muted" style="margin-top:18px">
+            <p class="muted">
                 Base yield:
                 <?= h(
                     calculatorFormatNumber($result['base_yield'])
                     . ' '
                     . $result['base_unit']
                 ) ?>.
-                Cooking time may vary depending on the quantity,
-                vessel size and cooking method.
+                Preparation instructions are displayed as saved;
+                ingredient quantities are scaled according to the selected yield.
             </p>
 
             <div class="actions">
@@ -924,20 +888,20 @@ function calculatorUnitList(): array
 
 <script>
 function downloadResult() {
-    const element = document.getElementById('result');
+    const resultElement = document.getElementById('result');
 
-    if (!element) {
+    if (!resultElement) {
         return;
     }
 
     const title = document.getElementById('recipeTitle');
 
-    const fileName = (
+    const filename = (
         title ? title.innerText : 'recipe'
     ).replace(/[^a-z0-9_-]/gi, '_');
 
     const blob = new Blob(
-        [element.innerText],
+        [resultElement.innerText],
         { type: 'text/plain;charset=utf-8' }
     );
 
@@ -945,7 +909,7 @@ function downloadResult() {
     const link = document.createElement('a');
 
     link.href = url;
-    link.download = fileName + '_recipe.txt';
+    link.download = filename + '_recipe.txt';
 
     document.body.appendChild(link);
     link.click();
@@ -959,4 +923,3 @@ function downloadResult() {
 
 </body>
 </html>
-```
