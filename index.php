@@ -1,5 +1,6 @@
 <?php
-require_once "db.php";
+require_once __DIR__ . '/db.php';
+
 
 // Redirect to login if the user is not logged in
 if (!isset($_SESSION["user_id"])) {
