@@ -13,9 +13,7 @@ if (session_status() === PHP_SESSION_NONE) {
  */
 
 // Start session before any output.
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+
 
 /* PostgreSQL configuration */
 $host   = getenv('DB_HOST') ?: '127.0.0.1';
