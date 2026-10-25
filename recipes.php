@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-require_once __DIR__.'/../db.php';
+require_once __DIR__.'/db.php';
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 function reply(int $status,array $data): never { http_response_code($status); echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); exit; }
