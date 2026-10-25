@@ -32,7 +32,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $_SESSION["username"] = $user["username"];
                 $_SESSION["name"] = $user["name"];
 
-                header("Location: index.php");
+                header("Location: recipe_details.php");
                 exit();
 
             } else {
