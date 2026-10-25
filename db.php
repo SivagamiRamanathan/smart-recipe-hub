@@ -1,19 +1,17 @@
 <?php
 
+/*
+ * Smart Recipe Hub - Database Connection
+ * IMPORTANT:
+ * This file must begin with <?php as the first bytes.
+ * Save as UTF-8 without BOM.
+ * Do not add HTML or a closing PHP tag.
+ */
+
+/* Start the session before any output */
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
-
-
-
-/*
- * IMPORTANT:
- * This file must start with <?php as the first bytes.
- * Do not add HTML, spaces, or output before the opening PHP tag.
- */
-
-// Start session before any output.
-
 
 /* PostgreSQL configuration */
 $host   = getenv('DB_HOST') ?: '127.0.0.1';
@@ -31,7 +29,7 @@ try {
         [
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES  => false,
+            PDO::ATTR_EMULATE_PREPARES   => false,
         ]
     );
 } catch (PDOException $e) {
@@ -48,14 +46,14 @@ if (!function_exists('h')) {
     function h(mixed $value): string
     {
         return htmlspecialchars(
-            (string)$value,
+            (string) $value,
             ENT_QUOTES | ENT_SUBSTITUTE,
             'UTF-8'
         );
     }
 }
 
-/* CSRF token generation */
+/* Generate a CSRF token for the current session */
 if (
     !isset($_SESSION['csrf_token'])
     || !is_string($_SESSION['csrf_token'])
@@ -68,7 +66,7 @@ if (
 if (!function_exists('csrf_field')) {
     function csrf_field(): string
     {
-        $token = (string)($_SESSION['csrf_token'] ?? '');
+        $token = (string) ($_SESSION['csrf_token'] ?? '');
 
         return '<input type="hidden" name="csrf_token" value="'
             . h($token)
@@ -76,7 +74,7 @@ if (!function_exists('csrf_field')) {
     }
 }
 
-/* Validate submitted CSRF token */
+/* Validate the submitted CSRF token */
 if (!function_exists('verify_csrf')) {
     function verify_csrf(): void
     {
@@ -91,17 +89,16 @@ if (!function_exists('verify_csrf')) {
             || !hash_equals($sessionToken, $postedToken)
         ) {
             http_response_code(419);
-            exit(
-                'Session expired. Refresh the page and try again.'
-            );
+            exit('Session expired. Refresh the page and try again.');
         }
     }
 }
 
 /*
  * Database schema.
- * Existing recipe rows are preserved.
+ * Existing recipe records are preserved.
  */
+
 $pdo->exec("
     CREATE TABLE IF NOT EXISTS admin_users (
         id SERIAL PRIMARY KEY,
@@ -138,7 +135,6 @@ $columns = [
 ];
 
 foreach ($columns as $column => $definition) {
-    // Column names are defined above, not supplied by user input.
     $pdo->exec(
         "ALTER TABLE recipes ADD COLUMN IF NOT EXISTS "
         . $column . " " . $definition
@@ -163,7 +159,9 @@ $pdo->exec("
         unit_name VARCHAR(80) NOT NULL,
         unit_symbol VARCHAR(20) NOT NULL,
         unit_type VARCHAR(20) NOT NULL
-            CHECK (unit_type IN ('weight','volume','count','other')),
+            CHECK (
+                unit_type IN ('weight', 'volume', 'count', 'other')
+            ),
         factor_to_base NUMERIC(14,6),
         base_unit VARCHAR(20) NOT NULL DEFAULT '',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -231,7 +229,4 @@ foreach ($seedUnits as $unit) {
     $unitStatement->execute($unit);
 }
 
-/*
- * Do not add a closing PHP tag.
- * This prevents accidental whitespace output.
- */
+/* Do not add a closing PHP tag here. */
