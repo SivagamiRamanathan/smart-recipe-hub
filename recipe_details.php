@@ -1,12 +1,19 @@
 <?php
-declare(strict_types=1);
-
 require_once __DIR__ . '/db.php';
 
+// Login check
+if (!isset($_SESSION["user_id"])) {
+    header("Location: login.php");
+    exit();
+}
+
+// Get recipe ID from the clicked recipe card
 $recipeId = filter_input(INPUT_GET, 'recipe_id', FILTER_VALIDATE_INT);
 
+// If no valid recipe ID is provided, go to Home
 if (!$recipeId || $recipeId <= 0) {
-    die("Invalid recipe ID. Please select a recipe.");
+    header("Location: index.php");
+    exit();
 }
 
 try {
@@ -23,33 +30,29 @@ try {
 
     if (!$recipe) {
         http_response_code(404);
-        die("Recipe not found.");
-    }
+        $errorMessage = "Recipe not found.";
+    } else {
+        $ingredientsRaw = $recipe['ingredients'] ?? '';
+        $ingredients = json_decode((string)$ingredientsRaw, true);
 
-    $ingredientsRaw = $recipe['ingredients'] ?? '';
-    $ingredients = json_decode((string)$ingredientsRaw, true);
-
-    // If ingredients are stored as plain text instead of JSON
-    if (!is_array($ingredients)) {
-        $ingredients = preg_split(
-            '/\r\n|\r|\n/',
-            (string)$ingredientsRaw
-        ) ?: [];
+        // Support ingredients saved as plain text
+        if (!is_array($ingredients)) {
+            $ingredients = preg_split(
+                '/\r\n|\r|\n/',
+                (string)$ingredientsRaw
+            ) ?: [];
+        }
     }
 
 } catch (PDOException $e) {
     error_log('Recipe details error: ' . $e->getMessage());
     http_response_code(500);
-    die("Unable to load recipe details. Please try again later.");
+    $errorMessage = "Unable to load recipe details. Please try again later.";
 }
 
 function escapeHtml($value): string
 {
-    return htmlspecialchars(
-        (string)$value,
-        ENT_QUOTES,
-        'UTF-8'
-    );
+    return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
 ?>
 <!DOCTYPE html>
@@ -59,7 +62,7 @@ function escapeHtml($value): string
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <title>
-        <?= escapeHtml($recipe['recipe_name']) ?> - Ingredients
+        <?= isset($recipe) ? escapeHtml($recipe['recipe_name']) . ' - Ingredients' : 'Recipe Details' ?>
     </title>
 
     <style>
@@ -94,6 +97,7 @@ function escapeHtml($value): string
             text-align: center;
             color: #666;
             margin-bottom: 25px;
+            line-height: 1.7;
         }
 
         h2 {
@@ -134,6 +138,14 @@ function escapeHtml($value): string
             margin-left: 12px;
         }
 
+        .method {
+            white-space: pre-line;
+            line-height: 1.8;
+            background: #f8faf7;
+            border-radius: 8px;
+            padding: 15px;
+        }
+
         .buttons {
             display: flex;
             justify-content: center;
@@ -159,6 +171,14 @@ function escapeHtml($value): string
         .cancel-button {
             background: #e5e7eb;
             color: #222;
+        }
+
+        .error-message {
+            text-align: center;
+            color: #a00000;
+            background: #ffeaea;
+            padding: 15px;
+            border-radius: 8px;
         }
 
         @media print {
@@ -197,79 +217,91 @@ function escapeHtml($value): string
 </head>
 
 <body>
-
 <div class="container">
 
-    <h1><?= escapeHtml($recipe['recipe_name']) ?></h1>
+    <?php if (isset($errorMessage)): ?>
 
-    <?php if (!empty($recipe['description_en'])): ?>
-        <p class="description">
-            <?= escapeHtml($recipe['description_en']) ?>
+        <h1>Recipe Details</h1>
+        <p class="error-message">
+            <?= escapeHtml($errorMessage) ?>
         </p>
+
+    <?php else: ?>
+
+        <h1><?= escapeHtml($recipe['recipe_name']) ?></h1>
+
+        <?php if (!empty($recipe['description_en'])): ?>
+            <p class="description">
+                <?= escapeHtml($recipe['description_en']) ?>
+            </p>
+        <?php endif; ?>
+
+        <div class="recipe-info">
+            <strong>Base Yield:</strong>
+            <?= escapeHtml($recipe['base_yield'] ?? '') ?>
+            <?= escapeHtml($recipe['base_unit'] ?? '') ?>
+        </div>
+
+        <h2>Ingredients</h2>
+
+        <ul class="ingredient-list">
+            <?php if (count($ingredients) > 0): ?>
+
+                <?php foreach ($ingredients as $ingredient): ?>
+                    <?php
+                    if (is_array($ingredient)) {
+                        $ingredientName = $ingredient['name']
+                            ?? $ingredient['name_en']
+                            ?? 'Ingredient';
+
+                        $quantity = $ingredient['quantity'] ?? null;
+                        $unit = $ingredient['unit'] ?? '';
+                    } else {
+                        $ingredientName = trim((string)$ingredient);
+                        $quantity = null;
+                        $unit = '';
+                    }
+                    ?>
+
+                    <?php if (trim((string)$ingredientName) !== ''): ?>
+                        <li>
+                            <span class="ingredient-name">
+                                <?= escapeHtml($ingredientName) ?>
+                            </span>
+
+                            <?php if ($quantity !== null && $quantity !== ''): ?>
+                                <span class="quantity">
+                                    <?= escapeHtml($quantity) ?>
+                                    <?= escapeHtml($unit) ?>
+                                </span>
+                            <?php endif; ?>
+                        </li>
+                    <?php endif; ?>
+
+                <?php endforeach; ?>
+
+            <?php else: ?>
+                <li>No ingredients available for this recipe.</li>
+            <?php endif; ?>
+        </ul>
+
+        <?php if (!empty($recipe['preparation_method'])): ?>
+            <h2>Preparation Method</h2>
+            <div class="method">
+                <?= escapeHtml($recipe['preparation_method']) ?>
+            </div>
+        <?php endif; ?>
+
     <?php endif; ?>
 
-    <div class="recipe-info">
-        <strong>Base Yield:</strong>
-        <?= escapeHtml($recipe['base_yield'] ?? '') ?>
-        <?= escapeHtml($recipe['base_unit'] ?? '') ?>
-    </div>
-
-    <h2>Ingredients</h2>
-
-    <ul class="ingredient-list">
-        <?php if (count($ingredients) > 0): ?>
-
-            <?php foreach ($ingredients as $ingredient): ?>
-
-                <?php
-                if (is_array($ingredient)) {
-                    $ingredientName = $ingredient['name']
-                        ?? $ingredient['name_en']
-                        ?? 'Ingredient';
-
-                    $quantity = $ingredient['quantity'] ?? null;
-                    $unit = $ingredient['unit'] ?? '';
-                } else {
-                    $ingredientName = trim((string)$ingredient);
-                    $quantity = null;
-                    $unit = '';
-                }
-                ?>
-
-                <?php if (trim((string)$ingredientName) !== ''): ?>
-                    <li>
-                        <span class="ingredient-name">
-                            <?= escapeHtml($ingredientName) ?>
-                        </span>
-
-                        <?php if ($quantity !== null && $quantity !== ''): ?>
-                            <span class="quantity">
-                                <?= escapeHtml($quantity) ?>
-                                <?= escapeHtml($unit) ?>
-                            </span>
-                        <?php endif; ?>
-                    </li>
-                <?php endif; ?>
-
-            <?php endforeach; ?>
-
-        <?php else: ?>
-
-            <li>No ingredients available for this recipe.</li>
-
-        <?php endif; ?>
-    </ul>
-
     <div class="buttons">
-        <button
-            class="print-button"
-            onclick="window.print()">
-            Print Ingredients
-        </button>
+        <?php if (!isset($errorMessage)): ?>
+            <button class="print-button" onclick="window.print()">
+                Print Ingredients
+            </button>
+        <?php endif; ?>
 
-        <button
-            class="cancel-button"
-            onclick="goHome()">
+        <button class="cancel-button" onclick="goHome()">
             Cancel / Home
         </button>
     </div>
