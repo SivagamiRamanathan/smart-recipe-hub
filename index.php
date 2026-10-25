@@ -198,7 +198,7 @@ try { $homeRecipes = $pdo->query("SELECT id, recipe_name, ingredients, image_url
     </section>
 
     <section class="content-section saved-recipes-section" id="explore-recipes">
-        <div class="section-title reveal"><span class="eyebrow">From your recipe database</span><h2>Explore your saved recipes.</h2><p>Every card below comes from the recipes saved in PostgreSQL. Add a food image URL while creating or editing a recipe to show its own photo here.</p></div>
+        <div class="section-title reveal"><span class="eyebrow">From your recipe database</span><h2>Explore your saved recipes.</h2></div>
         <?php if (!empty($homeRecipes)): ?>
         <div class="saved-recipes-grid">
             <?php foreach ($homeRecipes as $recipe):
@@ -216,7 +216,7 @@ try { $homeRecipes = $pdo->query("SELECT id, recipe_name, ingredients, image_url
                 if (is_array($decodedIngredients)) $ingredientSummary = implode(' · ', array_slice(array_map(fn($i) => (string)($i['name'] ?? ''), $decodedIngredients), 0, 3));
                 else { $rawIngredients = (string)($recipe['ingredients'] ?? ''); $ingredientSummary = function_exists('mb_substr') ? mb_substr($rawIngredients, 0, 90, 'UTF-8') : substr($rawIngredients, 0, 90); }
             ?>
-            <a class="saved-recipe-card reveal" href="recipes.php?recipe_id=<?= (int)$recipe['id'] ?>">
+            <div class="saved-recipe-card reveal"></div>
                 <div class="saved-recipe-image-wrap"><img class="saved-recipe-image" src="<?= htmlspecialchars($imageUrl, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($recipeName, ENT_QUOTES, 'UTF-8') ?> food photo" loading="lazy" onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=900&q=85'"></div>
                 <div class="saved-recipe-content"><h3><?= htmlspecialchars($recipeName, ENT_QUOTES, 'UTF-8') ?></h3><p><?= htmlspecialchars($ingredientSummary !== '' ? $ingredientSummary : 'Open this saved recipe to view its details.', ENT_QUOTES, 'UTF-8') ?></p><span class="saved-recipe-link">Explore recipe →</span></div>
             </a>
