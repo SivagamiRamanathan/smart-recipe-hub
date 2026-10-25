@@ -9,14 +9,26 @@ if (!isset($_SESSION["user_id"])) {
 
 $userName = $_SESSION["name"] ?? $_SESSION["username"] ?? "User";
 $homeRecipes = [];
-try { $homeRecipes = $pdo->query("SELECT id, recipe_name, ingredients, image_url FROM recipes ORDER BY id DESC LIMIT 12")->fetchAll(); } catch (Throwable $e) { error_log("Home recipe cards: ".$e->getMessage()); }
+
+try {
+    $homeRecipes = $pdo->query(
+        "SELECT id, recipe_name, ingredients, image_url
+         FROM recipes
+         ORDER BY id DESC
+         LIMIT 12"
+    )->fetchAll();
+} catch (Throwable $e) {
+    error_log("Home recipe cards: " . $e->getMessage());
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>Smart Recipe Hub | Home</title>
+
     <link rel="stylesheet" href="style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -37,7 +49,6 @@ try { $homeRecipes = $pdo->query("SELECT id, recipe_name, ingredients, image_url
         .profile-link { display:flex; align-items:center; justify-content:center; width:42px; height:42px; border-radius:50%; background:#eaf1e8; font-size:1.25rem!important; }
         .logout-link { padding:10px 16px; color:white!important; background:var(--green); border-radius:10px; }
         .logout-link:hover { background:var(--green-light); }
-        /* Added only for the Admin link */
         .main-nav .admin-link { display:inline-flex; align-items:center; justify-content:center; padding:11px 17px; border-radius:10px; background:var(--orange); color:#203529; font-size:.9rem; font-weight:800; transition:background .25s,transform .25s,box-shadow .25s; }
         .main-nav .admin-link:hover { background:#e5b45e; color:#173d2c; transform:translateY(-2px); box-shadow:0 6px 18px rgba(242,164,68,.25); }
         .hero-section { max-width:1450px; margin:auto; min-height:590px; padding:65px 6%; display:grid; grid-template-columns:1fr 1fr; align-items:center; gap:55px; overflow:hidden; }
@@ -74,7 +85,6 @@ try { $homeRecipes = $pdo->query("SELECT id, recipe_name, ingredients, image_url
         .food-video-heading { margin-bottom:28px; }
         .food-video-button { margin-top:22px; background:#f2a444; color:#203529; }
         .food-video-button:hover { background:#ffd18a; color:#203529; }
-        /* Animated food-video-style cover replaces only the old services heading */
         .food-motion-cover { position:relative; max-width:1250px; min-height:285px; margin:0 auto 42px; overflow:hidden; isolation:isolate; border-radius:28px; display:flex; align-items:center; justify-content:center; text-align:center; padding:44px 24px; color:#fff; background:#163d2b; box-shadow:0 20px 50px rgba(18,55,36,.18); }
         .food-motion-cover::before { content:""; position:absolute; z-index:-2; inset:-8%; background-image:linear-gradient(90deg,rgba(9,35,23,.72),rgba(9,35,23,.28),rgba(9,35,23,.62)),url('https://images.unsplash.com/photo-1498837167922-ddd27525d352?auto=format&fit=crop&w=1800&q=90'); background-size:cover; background-position:center; animation:foodVideoPan 18s ease-in-out infinite alternate; }
         .food-motion-cover::after { content:""; position:absolute; z-index:-1; inset:0; background:linear-gradient(120deg,transparent 20%,rgba(255,255,255,.12) 48%,transparent 70%); transform:translateX(-100%); animation:foodShimmer 7s ease-in-out infinite; }
@@ -211,19 +221,48 @@ try { $homeRecipes = $pdo->query("SELECT id, recipe_name, ingredients, image_url
                     elseif (str_contains($nameLower, 'rice') || str_contains($nameLower, 'biryani')) $imageUrl = 'https://images.unsplash.com/photo-1512058564366-18510be2db19?auto=format&fit=crop&w=900&q=85';
                     else $imageUrl = 'https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=900&q=85';
                 }
+
                 $ingredientSummary = '';
                 $decodedIngredients = json_decode((string)($recipe['ingredients'] ?? ''), true);
-                if (is_array($decodedIngredients)) $ingredientSummary = implode(' · ', array_slice(array_map(fn($i) => (string)($i['name'] ?? ''), $decodedIngredients), 0, 3));
-                else { $rawIngredients = (string)($recipe['ingredients'] ?? ''); $ingredientSummary = function_exists('mb_substr') ? mb_substr($rawIngredients, 0, 90, 'UTF-8') : substr($rawIngredients, 0, 90); }
+
+                if (is_array($decodedIngredients)) {
+                    $ingredientSummary = implode(
+                        ' · ',
+                        array_slice(
+                            array_map(fn($i) => (string)($i['name'] ?? ''), $decodedIngredients),
+                            0,
+                            3
+                        )
+                    );
+                } else {
+                    $rawIngredients = (string)($recipe['ingredients'] ?? '');
+                    $ingredientSummary = function_exists('mb_substr')
+                        ? mb_substr($rawIngredients, 0, 90, 'UTF-8')
+                        : substr($rawIngredients, 0, 90);
+                }
             ?>
             <a class="saved-recipe-card reveal" href="recipe_details.php?recipe_id=<?= (int)$recipe['id'] ?>">
-                <div class="saved-recipe-image-wrap"><img class="saved-recipe-image" src="<?= htmlspecialchars($imageUrl, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($recipeName, ENT_QUOTES, 'UTF-8') ?> food photo" loading="lazy" onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=900&q=85'"></div>
-                <div class="saved-recipe-content"><h3><?= htmlspecialchars($recipeName, ENT_QUOTES, 'UTF-8') ?></h3><p><?= htmlspecialchars($ingredientSummary !== '' ? $ingredientSummary : 'Open this saved recipe to view its details.', ENT_QUOTES, 'UTF-8') ?></p><span class="saved-recipe-link">Explore recipe →</span></div>
+                <div class="saved-recipe-image-wrap">
+                    <img class="saved-recipe-image"
+                         src="<?= htmlspecialchars($imageUrl, ENT_QUOTES, 'UTF-8') ?>"
+                         alt="<?= htmlspecialchars($recipeName, ENT_QUOTES, 'UTF-8') ?> food photo"
+                         loading="lazy"
+                         onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=900&q=85'">
+                </div>
+                <div class="saved-recipe-content">
+                    <h3><?= htmlspecialchars($recipeName, ENT_QUOTES, 'UTF-8') ?></h3>
+                    <p><?= htmlspecialchars($ingredientSummary !== '' ? $ingredientSummary : 'Open this saved recipe to view its details.', ENT_QUOTES, 'UTF-8') ?></p>
+                    <span class="saved-recipe-link">Explore recipe →</span>
+                </div>
             </a>
             <?php endforeach; ?>
         </div>
         <?php else: ?>
-        <div class="empty-recipes"><h3>No saved recipes yet</h3><p>When the admin saves recipes, they will appear here automatically with food-photo cards.</p><a class="button" href="admin.php">Add a recipe →</a></div>
+        <div class="empty-recipes">
+            <h3>No saved recipes yet</h3>
+            <p>When the admin saves recipes, they will appear here automatically with food-photo cards.</p>
+            <a class="button" href="admin.php">Add a recipe →</a>
+        </div>
         <?php endif; ?>
     </section>
 
@@ -238,7 +277,11 @@ try { $homeRecipes = $pdo->query("SELECT id, recipe_name, ingredients, image_url
                 <span class="eyebrow">Fresh ingredients · Beautiful recipes</span>
                 <h2>Good food starts with a little inspiration.</h2>
                 <p>Discover ingredients, plan your batch, and make every recipe with confidence.</p>
-                <div class="food-motion-pills"><span>🥬 Fresh ingredients</span><span>🍲 Recipe inspiration</span><span>✨ Made with care</span></div>
+                <div class="food-motion-pills">
+                    <span>🥬 Fresh ingredients</span>
+                    <span>🍲 Recipe inspiration</span>
+                    <span>✨ Made with care</span>
+                </div>
                 <a class="button food-video-button" href="calculator.php">Plan your ingredients →</a>
             </div>
         </div>
@@ -258,6 +301,7 @@ try { $homeRecipes = $pdo->query("SELECT id, recipe_name, ingredients, image_url
 </footer>
 <script>
 const revealItems = document.querySelectorAll(".reveal");
+
 if ("IntersectionObserver" in window) {
     const observer = new IntersectionObserver((entries) => {
         entries.forEach((entry) => {
@@ -267,6 +311,7 @@ if ("IntersectionObserver" in window) {
             }
         });
     }, { threshold: 0.12 });
+
     revealItems.forEach((item) => observer.observe(item));
 } else {
     revealItems.forEach((item) => item.classList.add("visible"));
