@@ -32,7 +32,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $_SESSION["username"] = $user["username"];
                 $_SESSION["name"] = $user["name"];
 
-                header("Location: recipe_details.php");
+                // Login successful: open Home page
+                header("Location: index.php");
                 exit();
 
             } else {
@@ -40,6 +41,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             }
 
         } catch (PDOException $e) {
+            error_log("Login error: " . $e->getMessage());
             $error = "Login failed. Please check the database.";
         }
     }
@@ -48,7 +50,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -144,7 +145,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 </head>
 
 <body>
-
     <div class="login-box">
 
         <h2>🥭 Smart Recipe Hub</h2>
@@ -153,7 +153,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         <?php if ($error !== ""): ?>
             <div class="error">
-                <?= htmlspecialchars($error) ?>
+                <?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?>
             </div>
         <?php endif; ?>
 
@@ -191,6 +191,5 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         </p>
 
     </div>
-
 </body>
 </html>
